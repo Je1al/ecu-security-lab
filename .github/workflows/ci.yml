@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-ecu:
+    name: Build ECU (C11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure & build
+        run: |
+          cmake -S . -B build
+          cmake --build build
+      - name: Run skeleton
+        run: ./build/ecu/ecu
+
+  test:
+    name: Tests (vcan + toolkit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Bring up virtual CAN
+        run: sudo bash docker/setup-vcan.sh vcan0
+      - name: Install toolkit
+        run: pip install -e ./toolkit
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
