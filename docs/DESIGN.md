@@ -30,8 +30,23 @@ STmin (inter-frame separation time) is parsed but not enforced in software — i
 governs real-bus timing, not in-memory reassembly; the note is kept honest here
 rather than faking a delay.
 
-## UDS (planned, M3)
+## UDS (M3)
 
-A request/response state machine over ISO-TP implementing the MVP services
-(`0x10`, `0x3E`, `0x22`, `0x2E`, then `0x27`/`0x23`), with correct negative
-response codes and an explicit secure/insecure mode for before/after comparison.
+A request/response core over ISO-TP (`ecu/uds.{h,c}`). `uds_process()` takes one
+complete request and returns one complete response; the surrounding loop handles
+ISO-TP and the bus. Implemented in M3:
+
+- `0x10` DiagnosticSessionControl — default / programming / extended, with the
+  suppress-positive-response bit honoured.
+- `0x3E` TesterPresent — keeps the session alive; the **S3 timeout** (5 s idle)
+  reverts to the default session. Time is injected by the caller (`now_ms`) so the
+  timeout is deterministic in tests rather than wall-clock dependent.
+- `0x22` / `0x2E` ReadDataByIdentifier / WriteDataByIdentifier — VIN (`0xF190`,
+  read-only), a spare-part number (`0xF187`), and a writable config block
+  (`0x0100`) that requires a non-default session.
+- Correct negative response codes (length, sub-function, out-of-range, …).
+
+`uds_mode_t` selects an **insecure** build (the deliberate weaknesses) versus a
+**secure** comparison build; the two diverge with SecurityAccess in M4. The
+pseudo-firmware image (`memory[]`) already hides the secret the attacker will
+recover by chaining the M4 weaknesses.
