@@ -14,6 +14,8 @@ jobs:
         run: |
           cmake -S . -B build
           cmake --build build
+      - name: Run C tests (ctest)
+        run: ctest --test-dir build --output-on-failure
       - name: Run skeleton
         run: ./build/ecu/ecu
 

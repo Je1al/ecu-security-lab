@@ -11,4 +11,6 @@ endif()
 
 add_compile_options(-Wall -Wextra -Wpedantic)
 
+include(CTest)  # defines BUILD_TESTING (default ON) and enables ctest
+
 add_subdirectory(ecu)
