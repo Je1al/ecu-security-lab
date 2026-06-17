@@ -11,6 +11,12 @@ endif()
 
 add_compile_options(-Wall -Wextra -Wpedantic)
 
+# Strict ISO C (CMAKE_C_EXTENSIONS OFF) hides POSIX/glibc symbols such as
+# clock_gettime and the SocketCAN headers; ask for them explicitly on Linux.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_definitions(_GNU_SOURCE)
+endif()
+
 include(CTest)  # defines BUILD_TESTING (default ON) and enables ctest
 
 add_subdirectory(ecu)

@@ -42,6 +42,10 @@ jobs:
         run: |
           cmake -S . -B build
           cmake --build build --target ecu
+      - name: Enable the vcan kernel module
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)"
       - name: Bring up virtual CAN
         run: sudo bash docker/setup-vcan.sh vcan0
       - name: Install toolkit
