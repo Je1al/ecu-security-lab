@@ -7,6 +7,12 @@
 static const char SECRET[] = "FLAG{ecu_secret_unlocked}";
 #define SECRET_OFFSET 0xC0u
 
+/* SecurityAccess parameters. The seed->key relation is intentionally a trivial,
+ * reversible XOR (see VULNERABILITIES.md, weakness #2). */
+#define SEC_KEY_XOR 0xA5A5A5A5u
+#define SEC_MAX_ATTEMPTS 3
+#define SEC_LOCKOUT_MS 10000u
+
 void uds_init(uds_server_t *s, uds_mode_t mode) {
     memset(s, 0, sizeof(*s));
     s->mode = mode;
@@ -162,6 +168,160 @@ static int svc_write_did(uds_server_t *s, const uint8_t *req, size_t req_len,
     return 3;
 }
 
+/* 0x27 SecurityAccess (level 1: 0x01 requestSeed / 0x02 sendKey).
+ *
+ * Deliberate weaknesses in the INSECURE build:
+ *   #1 the seed is a tiny incrementing counter -> predictable
+ *   #2 expected key = seed XOR constant -> reversible
+ *   #3 wrong keys are neither counted nor rate-limited -> brute forceable
+ * The SECURE build keeps the same wire format but counts attempts and enforces a
+ * lockout after SEC_MAX_ATTEMPTS.
+ */
+static int svc_security_access(uds_server_t *s, uint32_t now_ms,
+                               const uint8_t *req, size_t req_len, uint8_t *resp,
+                               size_t cap) {
+    if (req_len < 2) {
+        return neg(resp, cap, UDS_SID_SECURITY_ACCESS, UDS_NRC_INVALID_LENGTH);
+    }
+    uint8_t sub = req[1];
+    int suppress = sub & UDS_SUPPRESS_POS_RSP_BIT;
+    uint8_t level = sub & 0x7F;
+
+    if (level == 0x01) { /* requestSeed */
+        if (req_len != 2) {
+            return neg(resp, cap, UDS_SID_SECURITY_ACCESS,
+                       UDS_NRC_INVALID_LENGTH);
+        }
+        uint32_t seed;
+        if (s->unlocked) {
+            seed = 0; /* ISO 14229: already unlocked -> zero seed */
+        } else {
+            /* weakness #1: predictable, low-entropy seed */
+            s->last_seed = 0xA5A50000u + s->sec_counter;
+            s->sec_counter++;
+            s->seed_requested = 1;
+            seed = s->last_seed;
+        }
+        if (suppress) {
+            return 0;
+        }
+        if (cap < 6) {
+            return -1;
+        }
+        resp[0] = UDS_SID_SECURITY_ACCESS + UDS_POS_RESPONSE_BIT;
+        resp[1] = 0x01;
+        resp[2] = (uint8_t)(seed >> 24);
+        resp[3] = (uint8_t)(seed >> 16);
+        resp[4] = (uint8_t)(seed >> 8);
+        resp[5] = (uint8_t)(seed);
+        return 6;
+    }
+
+    if (level == 0x02) { /* sendKey */
+        if (req_len != 6) {
+            return neg(resp, cap, UDS_SID_SECURITY_ACCESS,
+                       UDS_NRC_INVALID_LENGTH);
+        }
+        if (s->mode == UDS_MODE_SECURE && now_ms < s->lockout_until_ms) {
+            return neg(resp, cap, UDS_SID_SECURITY_ACCESS,
+                       UDS_NRC_TIME_DELAY_NOT_EXPIRED);
+        }
+        if (!s->seed_requested) {
+            return neg(resp, cap, UDS_SID_SECURITY_ACCESS,
+                       UDS_NRC_CONDITIONS_NOT_CORRECT);
+        }
+        uint32_t key = ((uint32_t)req[2] << 24) | ((uint32_t)req[3] << 16) |
+                       ((uint32_t)req[4] << 8) | (uint32_t)req[5];
+        uint32_t expected = s->last_seed ^ SEC_KEY_XOR; /* weakness #2 */
+
+        if (key == expected) {
+            s->unlocked = 1;
+            s->seed_requested = 0;
+            s->sec_attempts = 0;
+            if (suppress) {
+                return 0;
+            }
+            if (cap < 2) {
+                return -1;
+            }
+            resp[0] = UDS_SID_SECURITY_ACCESS + UDS_POS_RESPONSE_BIT;
+            resp[1] = 0x02;
+            return 2;
+        }
+
+        /* wrong key */
+        if (s->mode == UDS_MODE_SECURE) {
+            s->sec_attempts++;
+            if (s->sec_attempts >= SEC_MAX_ATTEMPTS) {
+                s->lockout_until_ms = now_ms + SEC_LOCKOUT_MS;
+                s->sec_attempts = 0;
+                s->seed_requested = 0;
+                return neg(resp, cap, UDS_SID_SECURITY_ACCESS,
+                           UDS_NRC_EXCEED_ATTEMPTS);
+            }
+            return neg(resp, cap, UDS_SID_SECURITY_ACCESS, UDS_NRC_INVALID_KEY);
+        }
+        /* weakness #3: insecure build never counts or delays */
+        return neg(resp, cap, UDS_SID_SECURITY_ACCESS, UDS_NRC_INVALID_KEY);
+    }
+
+    return neg(resp, cap, UDS_SID_SECURITY_ACCESS, UDS_NRC_SUBFUNC_NOT_SUPPORTED);
+}
+
+/* 0x23 ReadMemoryByAddress.
+ *
+ * Deliberate weaknesses in the INSECURE build:
+ *   #4 the authorization gate checks seed_requested instead of unlocked, so
+ *      merely *requesting* a seed (no valid key) is enough to read memory.
+ *   #5 a locked reader gets securityAccessDenied (0x33) for valid-but-protected
+ *      addresses and requestOutOfRange (0x31) past the end -> an oracle that maps
+ *      the memory layout. The SECURE build returns a uniform 0x31.
+ */
+static int svc_read_memory(uds_server_t *s, const uint8_t *req, size_t req_len,
+                           uint8_t *resp, size_t cap) {
+    if (req_len < 2) {
+        return neg(resp, cap, UDS_SID_READ_MEMORY, UDS_NRC_INVALID_LENGTH);
+    }
+    uint8_t alfid = req[1];
+    uint8_t addr_len = alfid & 0x0F;
+    uint8_t size_len = (uint8_t)((alfid >> 4) & 0x0F);
+    if (addr_len < 1 || addr_len > 2 || size_len < 1 || size_len > 2) {
+        return neg(resp, cap, UDS_SID_READ_MEMORY, UDS_NRC_REQUEST_OUT_OF_RANGE);
+    }
+    if (req_len != (size_t)(2 + addr_len + size_len)) {
+        return neg(resp, cap, UDS_SID_READ_MEMORY, UDS_NRC_INVALID_LENGTH);
+    }
+
+    uint32_t addr = 0, size = 0;
+    size_t p = 2;
+    for (uint8_t i = 0; i < addr_len; i++) {
+        addr = (addr << 8) | req[p++];
+    }
+    for (uint8_t i = 0; i < size_len; i++) {
+        size = (size << 8) | req[p++];
+    }
+    if (size == 0 || addr + size > UDS_MEM_SIZE) {
+        return neg(resp, cap, UDS_SID_READ_MEMORY, UDS_NRC_REQUEST_OUT_OF_RANGE);
+    }
+
+    int authorized = s->unlocked ||
+                     (s->mode == UDS_MODE_INSECURE && s->seed_requested); /* #4 */
+    if (!authorized) {
+        if (s->mode == UDS_MODE_INSECURE) {
+            return neg(resp, cap, UDS_SID_READ_MEMORY,
+                       UDS_NRC_SECURITY_ACCESS_DENIED); /* #5 oracle */
+        }
+        return neg(resp, cap, UDS_SID_READ_MEMORY, UDS_NRC_REQUEST_OUT_OF_RANGE);
+    }
+
+    if (cap < 1 + size) {
+        return -1;
+    }
+    resp[0] = UDS_SID_READ_MEMORY + UDS_POS_RESPONSE_BIT;
+    memcpy(&resp[1], &s->memory[addr], size);
+    return (int)(1 + size);
+}
+
 int uds_process(uds_server_t *s, uint32_t now_ms, const uint8_t *req,
                 size_t req_len, uint8_t *resp, size_t cap) {
     uds_on_tick(s, now_ms);
@@ -180,6 +340,10 @@ int uds_process(uds_server_t *s, uint32_t now_ms, const uint8_t *req,
         return svc_read_did(s, req, req_len, resp, cap);
     case UDS_SID_WRITE_DID:
         return svc_write_did(s, req, req_len, resp, cap);
+    case UDS_SID_SECURITY_ACCESS:
+        return svc_security_access(s, now_ms, req, req_len, resp, cap);
+    case UDS_SID_READ_MEMORY:
+        return svc_read_memory(s, req, req_len, resp, cap);
     default:
         return neg(resp, cap, sid, UDS_NRC_SERVICE_NOT_SUPPORTED);
     }

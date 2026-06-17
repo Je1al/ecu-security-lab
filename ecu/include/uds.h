@@ -74,6 +74,7 @@ typedef struct uds_server {
     /* SecurityAccess state (M4). */
     int unlocked;             /* 1 once a valid key was supplied   */
     uint32_t last_seed;       /* seed handed out for subfunc 0x01  */
+    uint16_t sec_counter;     /* drives the (predictable) seed     */
     int seed_requested;       /* a seed is outstanding             */
     uint8_t sec_attempts;     /* consecutive failed key attempts   */
     uint32_t lockout_until_ms;/* delay window after too many fails */
