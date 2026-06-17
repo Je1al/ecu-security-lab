@@ -48,5 +48,26 @@ ISO-TP and the bus. Implemented in M3:
 
 `uds_mode_t` selects an **insecure** build (the deliberate weaknesses) versus a
 **secure** comparison build; the two diverge with SecurityAccess in M4. The
-pseudo-firmware image (`memory[]`) already hides the secret the attacker will
-recover by chaining the M4 weaknesses.
+pseudo-firmware image (`memory[]`) hides the secret the attacker recovers by
+chaining the M4 weaknesses.
+
+## Server loop & SocketCAN (M5)
+
+`uds_server_run` (`ecu/server.c`) ties everything together: receive a frame, feed
+the ISO-TP receiver, and when a full request is reassembled, run `uds_process` and
+segment the response back out (answering Flow Control as needed). It is portable —
+it only touches the `transport_t` HAL and a caller-supplied `now_ms` clock.
+
+`ecu/backends/socketcan.c` is the only Linux-specific file: it binds a raw
+`AF_CAN` socket (with a 100 ms receive timeout so the S3 timer can advance) and
+implements `transport_t`. The `ecu` binary wires it in on Linux; on macOS/Windows
+the binary prints a notice and the protocol cores are covered by the unit tests.
+
+## Attacker toolkit (M5)
+
+`toolkit/ecutk` is Python over raw SocketCAN, no third-party CAN libraries. ISO-TP
+and UDS are re-implemented on the attacker side too, so the framing stays visible.
+`attacks.py` provides the primitives (`scan_services`, `map_memory` via the NRC
+oracle, `recover_key`/`unlock`, `dump_memory`, `run_exploit`); `cli.py` is the
+front-end. The codecs are unit-tested in-process on any OS; the full chain runs
+against the live C target over `vcan` in CI (`tests/test_e2e.py`).

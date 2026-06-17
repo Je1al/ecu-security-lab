@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-ecu:
-    name: Build ECU (C11)
+    name: Build ECU + C tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,20 +16,39 @@ jobs:
           cmake --build build
       - name: Run C tests (ctest)
         run: ctest --test-dir build --output-on-failure
-      - name: Run skeleton
-        run: ./build/ecu/ecu
 
-  test:
-    name: Tests (vcan + toolkit)
+  toolkit:
+    name: Toolkit unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install toolkit
+        run: pip install -e ./toolkit
+      - name: Run pure tests
+        run: python -m unittest discover -s tests -v
+
+  e2e:
+    name: E2E attacks over vcan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the ECU target
+        run: |
+          cmake -S . -B build
+          cmake --build build --target ecu
       - name: Bring up virtual CAN
         run: sudo bash docker/setup-vcan.sh vcan0
       - name: Install toolkit
         run: pip install -e ./toolkit
-      - name: Run tests
+      - name: Run attacks against the target
+        env:
+          ECU_E2E: "1"
+          ECU_BIN: ${{ github.workspace }}/build/ecu/ecu
+          ECU_IFACE: vcan0
         run: python -m unittest discover -s tests -v

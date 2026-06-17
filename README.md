@@ -79,7 +79,7 @@ ISO 15765-2 (ISO-TP) · ISO 14229 (UDS) · ISO/SAE 21434 · UNECE R155.
 - [x] **M2** — ISO-TP (single + multi-frame, flow control) + tests
 - [x] **M3** — UDS core (`0x10` / `0x3E` / `0x22` / `0x2E`) + S3 timeout + tests
 - [x] **M4** — SecurityAccess (`0x27`) + ReadMemoryByAddress (`0x23`) with 5 documented vulns
-- [ ] **M5** — attacker toolkit (sniffer, scanner, seed/key, dump) + e2e in CI
+- [x] **M5** — attacker toolkit (sniffer, scanner, seed/key, dump) + e2e attacks in CI
 - [ ] **M6** — docs (VULNERABILITIES / DESIGN / UDS-primer) + demo
 - [ ] **M7** (stretch) — firmware-update exploit / fuzzer / CAN-IDS
 
