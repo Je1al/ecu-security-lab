@@ -62,6 +62,14 @@ cmake -S . -B build && cmake --build build
 python3 -m unittest discover -s tests -v
 ```
 
+## Documentation
+
+- [docs/DEMO.md](docs/DEMO.md) — run the full attack chain step by step
+- [docs/VULNERABILITIES.md](docs/VULNERABILITIES.md) — each weakness: exploit, impact, fix, standard
+- [docs/DESIGN.md](docs/DESIGN.md) — why the ISO-TP/UDS stack is built the way it is
+- [docs/UDS-primer.md](docs/UDS-primer.md) — short UDS/ISO-TP primer
+- [docs/INTERVIEW-NOTES.md](docs/INTERVIEW-NOTES.md) — study guide / Q&A
+
 ## Standards referenced
 
 ISO 15765-2 (ISO-TP) · ISO 14229 (UDS) · ISO/SAE 21434 · UNECE R155.
@@ -80,7 +88,7 @@ ISO 15765-2 (ISO-TP) · ISO 14229 (UDS) · ISO/SAE 21434 · UNECE R155.
 - [x] **M3** — UDS core (`0x10` / `0x3E` / `0x22` / `0x2E`) + S3 timeout + tests
 - [x] **M4** — SecurityAccess (`0x27`) + ReadMemoryByAddress (`0x23`) with 5 documented vulns
 - [x] **M5** — attacker toolkit (sniffer, scanner, seed/key, dump) + e2e attacks in CI
-- [ ] **M6** — docs (VULNERABILITIES / DESIGN / UDS-primer) + demo
+- [x] **M6** — docs (DEMO / VULNERABILITIES / DESIGN / UDS-primer / INTERVIEW-NOTES)
 - [ ] **M7** (stretch) — firmware-update exploit / fuzzer / CAN-IDS
 
 ## License
